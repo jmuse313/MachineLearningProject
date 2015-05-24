@@ -1,0 +1,98 @@
+---
+title: "Machine Learning Course Project"
+author: "jmuse313"
+date: "05/21/2015"
+output: html_document
+---
+
+##Data Cleaning
+
+After review of the Velloso et al. (2013) paper and visual examination of the training and test data, I viewed the data as a mix of two actual datasets. The "raw data" (window=no) from the study and then additional "processed data" calculated by the authors using the raw data (window=yes). A quick look at the testing set indicates that the goal would be to build the model based on the raw data since the testing data did not have any of the calculated window data. In theory it would be possible to follow the authors footsteps and calculate and use the window data, however since the test set is so small, it is unlikely that there would be sufficient data to calculate the window data for the testing set. 
+
+After loading the data, I began by dropping all rows where (window=yes) since I viewed that as a separate dataset.  I then dropped all columns that only contained NAs and the other columns pertaining to the window data. I also assumed that for this project we might be trying to predict the "classe" for new users, so I did not include the "user-name" variable in the analysis. I also did not include the index variable "X" in the model. My cleaned training dataset included 19,216 observations of 53 variables.
+
+```{r}
+#Load Data
+training <- read.csv("pml-training.csv", header=TRUE, na.strings=c("","NA"))
+testing <- read.csv("pml-testing.csv", header=TRUE, na.strings=c("","NA"))
+
+#function for testing columns for NAs
+na.test <-  function (x) {
+    w <- sapply(x, function(x)all(is.na(x)))
+    which(w==TRUE)
+}
+
+#Clean Data
+trainSet <- training[training$new_window=="no",]
+dropcols <- c(1, 2, 3, 4, 5, 6, 7)
+trainSet <- trainSet[,-dropcols]
+NAcols <- na.test(trainSet)
+trainSet <- trainSet[,-NAcols]
+testSet <- testing[,-dropcols]
+testSet <- testSet[,-NAcols]
+```
+
+##Model
+
+Reading Velloso et al. (2013) led me to use a Random Forest model. I found randomForest() to run much more quickly than train(), with similar results. The Random Forests website (http://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm#ooberr) explains that there is no need for additional cross validation or a separate test to get an unbiased estimate of the out of sample error (oob error) because of the way the random forest works.  From the website:
+
+> Each tree is constructed using a different bootstrap sample from the original data. About one-third of the cases are left out of the bootstrap sample and not used in the construction of the kth tree.
+
+
+> Put each case left out in the construction of the kth tree down the kth tree to get a classification. In this way, a test set classification is obtained for each case in about one-third of the trees. At the end of the run, take j to be the class that got most of the votes every time case n was oob. The proportion of times that j is not equal to the true class of n averaged over all cases is the oob error estimate. This has proven to be unbiased in many tests.
+
+Therefore, I chose not to do any additional cross validation, though I did initially only test my model on a random sample that was only 30% of the training set in order to reduce running time (and while reading up on the random forest method). When I felt that I understood the data, model, and purpose of the project (or understood it as much as I could), I built the model using the full training set. The oob error rate (out of sample error) is 0.28%. 
+
+
+```{r, cache=TRUE}
+library(caret)
+library(randomForest)
+set.seed(160)
+modFit <-randomForest(classe~., data=trainSet, xtest=testSet[,-53])
+print(modFit)
+```
+
+I did use the rfcv (Random Forest Cross-Validation for feature selection) function to look at the predictors. Mostly this was just an exercise in learning about rfcv. In the graph below you can see that as additional predictors are added, the error rate decreases. This also lends to the idea that there was no point in doing preProcessing because the additional variables continue to add information. If running time was an issue or the dataset was larger, you can see that if you did initial preProcessing for feature selection, you still have good accuracy with half the variables. 
+
+```{r, cache=TRUE}
+result <- rfcv(trainSet[,-53], trainSet$classe)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+```
+
+Additionally, I reviewed the variables by importance. I hoped it might give me some insight, knowing which variables provide the most information to the model, but I think ultimately I felt that I did not know enough about the variables to learn anything additional.  I read the paper, but without being more familiar with the topic, I found it difficult to have any additional expectations about the variables. 
+
+```{r}
+modImportance <- as.data.frame(modFit$importance)
+modRowNames <- rownames(modImportance)
+modImportance$Predictors <- rownames(modImportance)
+modImportance <- modImportance[order(modImportance$MeanDecreaseGini, decreasing=TRUE),]
+rownames(modImportance) <- c(1:length(modImportance$MeanDecreaseGini))
+print(modImportance)
+
+```
+
+##Discussion
+
+The very low error rate means the model is highly accurate, though as other classmates have pointed out in the forums, the high degree of accuracy is suspicious. In the discussion forums several people pointed out that it could be due to the fact that the weightlifters were being supervised during the collection of data.  I would expect the model to perform much more poorly against a completely new set of weightlifters that were not being supervised.  Additionally, the goal of this project seems a little odd.  Predicting which class at a particular instant in time makes less sense to me than the window approach that Velloso et al. (2013) took. Not to mention, they pointed out that the application of the random forest model for classification is less useful in the real world due to the fact that you'd have to collect data for every possible type of error, and for the model to really work well, you'd have to collect specific data on new users performing the activities correctly and poorly.
+
+I think it would make more sense to look at each completed exercise before classifying whether it was "correct" or "incorrect".  You would still need the more refined data so that you could pinpoint where the exercise the error was made, but looking at the exercise after it's completed (or looking at longer windows like the paper did) just makes more sense than looking at a particular instant in time.  However, there is the trade off of less instantaneous feedback.  This is fine for weight lifting where you do many repetitions of the exercise, but in other exercises (like running or swimming) you would want feedback before you have completed the exercise. Even with running or swimming though, you would really need to be looking at the exercise over a window of time to really evaluate what is happening though.
+
+Code for the predicted variables and creation of the text files:
+
+```{r}
+pred <- modFit$test[1]$predicted
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(pred)
+```
+
+##Citation
+
+Citation: Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
